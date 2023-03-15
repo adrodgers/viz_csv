@@ -17,6 +17,8 @@ eframe = { version = "0.21.0", default-features = false, features = [
 
 # You only need serde if you want app persistence:
 serde = { version = "1", features = ["derive"] }
+egui_file = "0.8.0"
+polars = { version = "0.27.2", features = ["ndarray"] }
 
 # native:
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]

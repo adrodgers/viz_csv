@@ -1,26 +1,38 @@
+use egui_file::{FileDialog, Filter};
+use polars::prelude::*;
+use std::{
+    ffi::OsStr,
+    path::{Path, PathBuf},
+};
+
 /// We derive Deserialize/Serialize so we can persist app state on shutdown.
 #[derive(serde::Deserialize, serde::Serialize)]
 #[serde(default)] // if we add new fields, give them default values when deserializing old state
-pub struct TemplateApp {
+pub struct VizCsvApp {
     // Example stuff:
     label: String,
 
     // this how you opt-out of serialization of a member
     #[serde(skip)]
     value: f32,
+    opened_file: Option<PathBuf>,
+    #[serde(skip)]
+    open_file_dialog: Option<FileDialog>,
 }
 
-impl Default for TemplateApp {
+impl Default for VizCsvApp {
     fn default() -> Self {
         Self {
             // Example stuff:
             label: "Hello World!".to_owned(),
             value: 2.7,
+            open_file_dialog: None,
+            opened_file: None,
         }
     }
 }
 
-impl TemplateApp {
+impl VizCsvApp {
     /// Called once before the first frame.
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         // This is also where you can customize the look and feel of egui using
@@ -36,7 +48,7 @@ impl TemplateApp {
     }
 }
 
-impl eframe::App for TemplateApp {
+impl eframe::App for VizCsvApp {
     /// Called by the frame work to save state before shutdown.
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         eframe::set_value(storage, eframe::APP_KEY, self);
@@ -45,7 +57,12 @@ impl eframe::App for TemplateApp {
     /// Called each time the UI needs repainting, which may be many times per second.
     /// Put your widgets into a `SidePanel`, `TopPanel`, `CentralPanel`, `Window` or `Area`.
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        let Self { label, value } = self;
+        let Self {
+            label,
+            value,
+            open_file_dialog,
+            opened_file,
+        } = self;
 
         // Examples of how to create different panels and windows.
         // Pick whichever suits you.
@@ -93,6 +110,20 @@ impl eframe::App for TemplateApp {
         });
 
         egui::CentralPanel::default().show(ctx, |ui| {
+            if (ui.button("Open")).clicked() {
+                let mut dialog = FileDialog::open_file(self.opened_file.clone()).filter(filter());
+                dialog.open();
+                self.open_file_dialog = Some(dialog);
+            }
+
+            if let Some(dialog) = &mut self.open_file_dialog {
+                if dialog.show(ctx).selected() {
+                    if let Some(file) = dialog.path() {
+                        self.opened_file = Some(file);
+                        // file_to_df(self.opened_file.unwrap());
+                    }
+                }
+            }
             // The central panel the region left after adding TopPanel's and SidePanel's
 
             ui.heading("eframe template");
@@ -113,4 +144,15 @@ impl eframe::App for TemplateApp {
             });
         }
     }
+}
+
+pub fn filter() -> Filter {
+    Box::new(|path: &Path| -> bool {
+        return path.extension() == Some(OsStr::new("txt"))
+            || path.extension() == Some(OsStr::new("csv"));
+    })
+}
+
+fn file_to_df(path: PathBuf) -> PolarsResult<DataFrame> {
+    CsvReader::from_path(path)?.has_header(true).finish()
 }
