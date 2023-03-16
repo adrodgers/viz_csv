@@ -9,25 +9,21 @@ use std::{
 #[derive(serde::Deserialize, serde::Serialize)]
 #[serde(default)] // if we add new fields, give them default values when deserializing old state
 pub struct VizCsvApp {
-    // Example stuff:
-    label: String,
-
-    // this how you opt-out of serialization of a member
-    #[serde(skip)]
-    value: f32,
     opened_file: Option<PathBuf>,
     #[serde(skip)]
     open_file_dialog: Option<FileDialog>,
+    #[serde(skip)]
+    dataframe: Option<DataFrame>,
+    selected_column: Option<String>,
 }
 
 impl Default for VizCsvApp {
     fn default() -> Self {
         Self {
-            // Example stuff:
-            label: "Hello World!".to_owned(),
-            value: 2.7,
             open_file_dialog: None,
             opened_file: None,
+            dataframe: None,
+            selected_column: None,
         }
     }
 }
@@ -58,10 +54,10 @@ impl eframe::App for VizCsvApp {
     /// Put your widgets into a `SidePanel`, `TopPanel`, `CentralPanel`, `Window` or `Area`.
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         let Self {
-            label,
-            value,
             open_file_dialog,
             opened_file,
+            dataframe,
+            selected_column,
         } = self;
 
         // Examples of how to create different panels and windows.
@@ -81,68 +77,50 @@ impl eframe::App for VizCsvApp {
             });
         });
 
-        egui::SidePanel::left("side_panel").show(ctx, |ui| {
-            ui.heading("Side Panel");
-
-            ui.horizontal(|ui| {
-                ui.label("Write something: ");
-                ui.text_edit_singleline(label);
-            });
-
-            ui.add(egui::Slider::new(value, 0.0..=10.0).text("value"));
-            if ui.button("Increment").clicked() {
-                *value += 1.0;
-            }
-
-            ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = 0.0;
-                    ui.label("powered by ");
-                    ui.hyperlink_to("egui", "https://github.com/emilk/egui");
-                    ui.label(" and ");
-                    ui.hyperlink_to(
-                        "eframe",
-                        "https://github.com/emilk/egui/tree/master/crates/eframe",
-                    );
-                    ui.label(".");
-                });
-            });
-        });
-
         egui::CentralPanel::default().show(ctx, |ui| {
             if (ui.button("Open")).clicked() {
-                let mut dialog = FileDialog::open_file(self.opened_file.clone()).filter(filter());
+                let mut dialog = FileDialog::open_file(opened_file.clone()).filter(filter());
                 dialog.open();
-                self.open_file_dialog = Some(dialog);
+                *open_file_dialog = Some(dialog);
             }
 
-            if let Some(dialog) = &mut self.open_file_dialog {
+            if let Some(dialog) = open_file_dialog {
                 if dialog.show(ctx).selected() {
-                    if let Some(file) = dialog.path() {
-                        self.opened_file = Some(file);
-                        // file_to_df(self.opened_file.unwrap());
+                    *opened_file = dialog.path();
+                    if let Ok(df) = file_to_df(&dialog.path().unwrap()) {
+                        *dataframe = Some(df);
                     }
                 }
             }
             // The central panel the region left after adding TopPanel's and SidePanel's
+            if let Some(df) = dataframe {
+                let column_names = df.get_column_names();
+                egui::ComboBox::from_label("Select column!")
+                    .selected_text(format!("{:?}", selected_column))
+                    .show_ui(ui, |ui| {
+                        for name in column_names {
+                            ui.selectable_value(selected_column, Some(name.to_string()), name);
+                        }
+                    });
+                egui::plot::Plot::new("data").show(ui, |plot_ui| {
+                    // plot_ui.line(
+                    if let Some(column_name) = selected_column {
+                        let y: Vec<f64> = df
+                            .column(&column_name)
+                            .unwrap()
+                            .f64()
+                            .unwrap()
+                            .into_iter()
+                            .map(|val| val.unwrap())
+                            .collect();
 
-            ui.heading("eframe template");
-            ui.hyperlink("https://github.com/emilk/eframe_template");
-            ui.add(egui::github_link_file!(
-                "https://github.com/emilk/eframe_template/blob/master/",
-                "Source code."
-            ));
+                        let line = egui::plot::Line::new(egui::plot::PlotPoints::from_ys_f64(&y));
+                        plot_ui.line(line);
+                    }
+                });
+            }
             egui::warn_if_debug_build(ui);
         });
-
-        if false {
-            egui::Window::new("Window").show(ctx, |ui| {
-                ui.label("Windows can be moved by dragging them.");
-                ui.label("They are automatically sized based on contents.");
-                ui.label("You can turn on resizing and scrolling if you like.");
-                ui.label("You would normally choose either panels OR windows.");
-            });
-        }
     }
 }
 
@@ -153,6 +131,9 @@ pub fn filter() -> Filter {
     })
 }
 
-fn file_to_df(path: PathBuf) -> PolarsResult<DataFrame> {
-    CsvReader::from_path(path)?.has_header(true).finish()
+fn file_to_df(path: &PathBuf) -> PolarsResult<DataFrame> {
+    CsvReader::from_path(path)?
+        .has_header(false)
+        .with_delimiter(' ' as u8)
+        .finish()
 }
